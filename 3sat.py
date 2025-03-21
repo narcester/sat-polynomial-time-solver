@@ -1,19 +1,96 @@
+def sort_any_permutations(*permutations):
+    # Step 1: Remove duplicates within each permutation
+    deduped_perms = []
+    for p in permutations:
+        seen = set()
+        unique_p = []
+        for num in p:
+            if num not in seen:
+                seen.add(num)
+                unique_p.append(num)
+        deduped_perms.append(unique_p)
+    
+    # Step 2: Remove exact duplicates
+    unique_perms = [list(p) for p in {tuple(p) for p in deduped_perms}]
+    
+    # Step 3: Remove reverse duplicates (keep lex-first)
+    seen_reverse = set()
+    no_reverse_perms = []
+    for perm in sorted(unique_perms, key=lambda x: x):
+        rev = tuple(reversed(perm))
+        if tuple(perm) not in seen_reverse and rev not in seen_reverse:
+            seen_reverse.add(tuple(perm))
+            seen_reverse.add(rev)
+            no_reverse_perms.append(perm)
+    
+    # Step 4: Sort by length → absolute values → original permutation
+    return sorted(
+        no_reverse_perms,
+        key=lambda x: (len(x), [abs(num) for num in x], x)
+    )
+
 def process_formula(arrays):
-    # Step 1: Group arrays by their sorted unique absolute values
+    sorted_arrays = sort_any_permutations(*arrays)
+    
+    # Track all clauses globally for unit propagation
+    all_clauses = sorted_arrays.copy()
+    variables = {}
+    unsatisfiable = 0
+    
+    def is_clause_satisfied(clause):
+        for num in clause:
+            var = abs(num)
+            required = 1 if num > 0 else 0
+            if var in variables and len(variables[var]) == 1:
+                if required in variables[var]:
+                    return True
+        return False
+    
+    def unit_prop():
+        nonlocal unsatisfiable
+        changed = True
+        while changed and not unsatisfiable:
+            changed = False
+            for clause in all_clauses:
+                if is_clause_satisfied(clause):
+                    continue
+                unfixed_vars = []
+                required_values = {}
+                for num in clause:
+                    var = abs(num)
+                    required = 1 if num > 0 else 0
+                    if var not in variables or len(variables[var]) > 1:
+                        unfixed_vars.append(var)
+                        required_values[var] = required
+                    else:
+                        current_val = next(iter(variables[var]))
+                        if required != current_val:
+                            continue
+                        else:
+                            break
+                else:
+                    if not unfixed_vars:
+                        unsatisfiable = 1
+                        return
+                    if len(unfixed_vars) == 1:
+                        var = unfixed_vars[0]
+                        required = required_values[var]
+                        current = variables.get(var, {0, 1})
+                        if required not in current:
+                            unsatisfiable = 1
+                            return
+                        if len(current) > 1:
+                            variables[var] = {required}
+                            changed = True
+    
     groups = {}
-    for arr in arrays:
-        # Extract unique absolute values, sort them to form the group key
+    for arr in sorted_arrays:
         key = tuple(sorted({abs(x) for x in arr}))
         if key not in groups:
             groups[key] = []
         groups[key].append(arr)
     
-    # Step 2: Sort groups by the length of their keys (ascending) and then by the key elements
     sorted_groups = sorted(groups.items(), key=lambda x: (len(x[0]), x[0]))
-    
-    # Initialize variables and unsatisfiable flag
-    variables = {}
-    unsatisfiable = 0
     
     for (group_key, group_arrays) in sorted_groups:
         if unsatisfiable:
@@ -23,53 +100,50 @@ def process_formula(arrays):
         group_size = len(group_arrays)
         threshold = 2 ** n
         
-        # Check if group size >= 2^n
         if group_size >= threshold:
             unsatisfiable = 1
             break
         
-        # Calculate 2^(n)/2 = 2^(n-1)
         count_threshold = 2 ** (n - 1)
         
-        # Count positive and negative occurrences for each variable in the group
+        active_clauses = []
+        for arr in group_arrays:
+            if not is_clause_satisfied(arr):
+                active_clauses.append(arr)
+        
+        if not active_clauses:
+            continue
+        
         pos_counts = {var: 0 for var in group_key}
         neg_counts = {var: 0 for var in group_key}
         
-        for arr in group_arrays:
+        for arr in active_clauses:
             present_vars = set()
             for num in arr:
                 var = abs(num)
-                if var in group_key and var not in present_vars:  # Consider each var once per array
+                if var in variables and len(variables[var]) == 1:
+                    continue
+                if var in group_key and var not in present_vars:
                     present_vars.add(var)
                     if num > 0:
                         pos_counts[var] += 1
                     else:
                         neg_counts[var] += 1
         
-        # Determine required changes for variables in this group
         changes = {}
         for var in group_key:
             current = variables.get(var, {0, 1})
-            pos = pos_counts[var]
-            neg = neg_counts[var]
-            
-            # Check if already fixed
             if len(current) == 1:
-                # No change needed, but ensure that existing value is compatible with any possible new setting
-                # Since variable is fixed, but check if this group's processing would require a conflict
-                # However, according to problem statement, only set based on counts meeting threshold
-                # So if variable is already fixed, skip processing unless the threshold is met here
-                # But need to check if the current counts would force a conflict
-                # However, per problem description, variables are fixed in previous groups and subsequent groups must check compatibility
-                # So here, we only process variables not already fixed
                 continue
             
-            if pos >= count_threshold:
+            pos = pos_counts.get(var, 0)
+            neg = neg_counts.get(var, 0)
+            
+            if pos > count_threshold:
                 changes[var] = 1
-            elif neg >= count_threshold:
+            elif neg > count_threshold:
                 changes[var] = 0
         
-        # Apply changes and check compatibility
         for var, val in changes.items():
             current = variables.get(var, {0, 1})
             if val not in current:
@@ -77,40 +151,34 @@ def process_formula(arrays):
                 break
             variables[var] = {val}
         
-        # After applying changes, check all variables in group for compatibility
-        for var in group_key:
-            current = variables.get(var, {0, 1})
-            if len(current) == 0:
-                unsatisfiable = 1
-                break
+        if unsatisfiable:
+            break
+        
+        unit_prop()
         if unsatisfiable:
             break
     
-    # Prepare the result
+    # Remove the final unsatisfiability check
+    # (The formula is satisfiable if no conflicts were detected)
+    
+    all_vars = set()
+    for arr in arrays:
+        for num in arr:
+            all_vars.add(abs(num))
+    result = {}
+    for var in sorted(all_vars):
+        vals = variables.get(var, {0, 1})
+        result[f"x{var}"] = list(vals) if len(vals) > 1 else list(vals)
+    
     if unsatisfiable:
         return "This formula is unsatisfiable.", None
     else:
-        # Collect all variables, including those not mentioned (default to [0,1])
-        all_vars = set()
-        for arr in arrays:
-            for num in arr:
-                all_vars.add(abs(num))
-        result = {}
-        for var in sorted(all_vars):
-            vals = variables.get(var, {0, 1})
-            if vals == {0, 1}:
-                result[f"x{var}"] = [0, 1]
-            else:
-                result[f"x{var}"] = list(vals)
         return "This formula is satisfiable, as long as there exists at least one assignment.", result
 
-# Example usage
+# Test with the user's example
 input_arrays = [
-    [-1,3],
-    [1,2],
-    [-2],
-    [4,5],
-    [-4,-5],
+    [1,-3],
+    [2,3,-1]
 ]
 
 message, assignments = process_formula(input_arrays)
