@@ -1,1 +1,1 @@
-Hello everyone, this repo is an EXTREME WIP, this is meant to show that I was the one that solved the P vs NP problem by solving the Boolean Satisfiability Problem (or SAT for short). The code I have published, which isn't fully finished, I still have to add the sorting process, is the basic process that goes into solving the SAT problem polynomially. More is coming very soon. Stay tuned.
+Hello everyone, this repo is an EXTREME WIP, this is an attempt at solving the P vs NP problem by tackling a new way into solving it. The code has not been finished yet.
